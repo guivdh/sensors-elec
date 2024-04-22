@@ -1,74 +1,63 @@
+#include <ArduinoWebsockets.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
-#include <DHT.h>
 #include "config.h"
-
-#define DHTPIN 4
-#define DHTTYPE DHT11
 
 const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
+const char* websocket_server = "http://192.168.129.7:8081/sockets/test"; // Adresse du serveur WebSocket
 
-const char* serverUrl = "http://192.168.129.7:8081/measurements";
+using namespace websockets;
 
-const int ledPin = 2;
-const int greenLedPin = 18;
-
-DHT dht(DHTPIN, DHTTYPE);
+WebsocketsClient client;
 
 void setup() {
-  Serial.begin(115200);
-  delay(100);
+    Serial.begin(9600);
 
-  pinMode(ledPin, OUTPUT);
-  pinMode(greenLedPin, OUTPUT);
-  dht.begin();
+    // Connexion au réseau WiFi
+    WiFi.begin(ssid, password);
+    Serial.print("Connecting to WiFi");
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.print(".");
+    }
+    Serial.println("Connected to WiFi");
 
-  WiFi.begin(ssid, password);
+    // Connexion au serveur WebSocket
+    bool connected = client.connect(websocket_server);
+    if (connected) {
+        Serial.println("Connected to WebSocket server");
+        client.send("Hello Server");
+    } else {
+        Serial.println("Connection to WebSocket server failed");
+    }
 
-  while (WiFi.status() != WL_CONNECTED) {
-    digitalWrite(greenLedPin, HIGH);
-    delay(100);
-    digitalWrite(greenLedPin, LOW);
-    delay(100);
-  }
-
-  Serial.println("");
-  digitalWrite(greenLedPin, HIGH);
-  Serial.println("Connexion WiFi établie");
-  Serial.println("Adresse IP: ");
-  Serial.println(WiFi.localIP());
+    // Définition de la fonction de rappel pour la réception des messages
+    client.onMessage([&](WebsocketsMessage message) {
+        Serial.print("Received message: ");
+        Serial.println(message.data());
+    });
 }
 
 void loop() {
-  if (WiFi.status() == WL_CONNECTED) {
-    float temperature = dht.readTemperature();
-    float humidity = dht.readHumidity();
+    // Permettre au client WebSocket de vérifier les messages entrants
+    //client.poll();
+    
+    // Lire les données de l'Arduino via RX/TX et les envoyer via WebSocket
+    readDataFromArduino();
+    
+    //delay(500);
+}
 
-    if (isnan(temperature) || isnan(humidity)) {
-      delay(2000);
-      return;
+void sendDataToWebSocket(String data) {
+     client.send(data);
+}
+
+void readDataFromArduino() {
+    // Lire les données du port série (RX/TX) de l'Arduino
+    if (Serial.available()) {
+        String data = Serial.readString();
+        Serial.println(data);
+        // Envoyer les données lues via WebSocket
+        sendDataToWebSocket(data);
     }
-
-    HTTPClient http;
-
-    http.begin(serverUrl);
-    http.addHeader("Content-Type", "application/json");
-
-    String requestBody = "{\"sensorId\": 1, \"value\": \"{temp: " + String(temperature) + ", hum: " + String(humidity) + "}\"}";
-
-    int httpResponseCode = http.POST(requestBody);
-
-    if (httpResponseCode > 0) {
-      digitalWrite(ledPin, HIGH);
-      delay(1000);
-      digitalWrite(ledPin, LOW);
-    }
-
-    http.end();
-  } else {
-    Serial.println("Erreur de connexion WiFi");
-  }
-
-  delay(5000);
 }
